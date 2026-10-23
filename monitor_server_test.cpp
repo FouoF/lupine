@@ -22,10 +22,12 @@ int main() {
   strcpy(child.workload_id, R"(job:"worker\name)");
   device_snapshot device;
   device.uuid = "GPU-test";
-  assert(client_id_for(child) == "10.0.0.1:worker:42:7");
-  const auto labels = client_labels(client_key_for(child, device));
-  assert(labels.find(R"(workload_id="job:\"worker\\name")") !=
-         std::string::npos);
+  assert(client_id_for(child) == R"(job:"worker\name)");
+  auto labels = client_labels(client_key_for(child, device));
+  assert(labels.find(R"(client_id="job:\"worker\\name")") != std::string::npos);
+  assert(labels.find("workload_id=") == std::string::npos);
+  child.workload_id[0] = '\0';
+  assert(client_id_for(child) == "7");
   registry = new monitor_registry{};
   pthread_mutex_init(&registry->registry_mutex, nullptr);
   for (int i = 0; i < 2; ++i) {
@@ -37,12 +39,13 @@ int main() {
     strcpy(slot.workload_id, "job:one");
   }
   auto metrics = lupine_monitoring_render_metrics();
-  assert(metrics.find("workload_id=\"job:one\"") != std::string::npos);
+  assert(metrics.find("client_id=\"job:one\"") != std::string::npos);
+  assert(metrics.find("workload_id=") == std::string::npos);
   strcpy(registry->slots[1].workload_id, "job:two");
   metrics = lupine_monitoring_render_metrics();
-  assert(metrics.find("workload_id=\"job:one\"") == std::string::npos);
-  assert(metrics.find("workload_id=\"job:two\"") == std::string::npos);
-  assert(metrics.find("workload_id=\"\"") != std::string::npos);
+  assert(metrics.find("client_id=\"job:one\"") == std::string::npos);
+  assert(metrics.find("client_id=\"job:two\"") == std::string::npos);
+  assert(metrics.find("client_id=\"7\"") != std::string::npos);
   registry->slots[0].state = registry->slots[1].state = kSlotFree;
   metrics = lupine_monitoring_render_metrics();
   assert(metrics.find("lupine_server_connection_info{") == std::string::npos);

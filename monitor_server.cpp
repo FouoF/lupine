@@ -553,17 +553,15 @@ struct client_key {
   std::string client_address;
   std::string client_hostname;
   std::string client_process_name;
-  std::string workload_id;
   unsigned int device_index = 0;
   std::string device_uuid;
 
   bool operator<(const client_key &other) const {
     return std::tie(client_id, client_address, client_hostname,
-                    client_process_name, workload_id, device_index,
-                    device_uuid) <
+                    client_process_name, device_index, device_uuid) <
            std::tie(other.client_id, other.client_address,
                     other.client_hostname, other.client_process_name,
-                    other.workload_id, other.device_index, other.device_uuid);
+                    other.device_index, other.device_uuid);
   }
 };
 
@@ -574,7 +572,8 @@ struct process_sample {
   bool utilization_valid = false;
 };
 
-std::string client_id_for(const child_snapshot &child) {
+// Groups connections from one client process. Not exported.
+std::string process_key_for(const child_snapshot &child) {
   const auto &metadata = child.metadata;
   std::ostringstream out;
   if (metadata.client_pid > 0) {
@@ -586,6 +585,19 @@ std::string client_id_for(const child_snapshot &child) {
     }
     out << ':' << metadata.client_pid;
     return out.str();
+  }
+  return std::string("connection:") + child.client_address + ':' +
+         std::to_string(child.server_pid);
+}
+
+// PID by default. LUPINE_WORKLOAD_ID replaces it for every connection that
+// reports the same value.
+std::string client_id_for(const child_snapshot &child) {
+  if (child.workload_id[0] != '\0') {
+    return child.workload_id;
+  }
+  if (child.metadata.client_pid > 0) {
+    return std::to_string(child.metadata.client_pid);
   }
   return std::string("connection:") + child.client_address + ':' +
          std::to_string(child.server_pid);
@@ -603,7 +615,6 @@ client_key client_key_for(const child_snapshot &child,
   key.client_process_name = child.metadata.client_process_name[0] == '\0'
                                 ? "unknown"
                                 : child.metadata.client_process_name;
-  key.workload_id = child.workload_id;
   key.device_index = device.index;
   key.device_uuid = device.uuid;
   return key;
@@ -615,7 +626,6 @@ std::string client_labels(const client_key &key) {
       << label("client_address", key.client_address) << ','
       << label("client_hostname", key.client_hostname) << ','
       << label("client_name", key.client_process_name) << ','
-      << label("workload_id", key.workload_id) << ','
       << label("device_uuid", key.device_uuid) << ',' << "device_index=\""
       << key.device_index << "\"";
   return out.str();
@@ -766,18 +776,18 @@ void lupine_monitoring_end_context_create(bool context_created) {
 std::string lupine_monitoring_render_metrics() {
   registry_snapshot registry_values = snapshot_registry();
   std::vector<child_snapshot> &children = registry_values.children;
-  // CUDA and NVML connections from a process must agree on attribution.
-  // Keep client_id unchanged; conflicts suppress only the workload label.
+  // CUDA and NVML connections from one process must agree. A disagreement
+  // leaves client_id as the process id.
   std::map<std::string, std::string> identities;
   std::set<std::string> conflicts;
   for (const auto &child : children) {
-    const std::string id = client_id_for(child);
+    const std::string id = process_key_for(child);
     auto result = identities.emplace(id, child.workload_id);
     if (!result.second && result.first->second != child.workload_id)
       conflicts.insert(id);
   }
   for (auto &child : children) {
-    if (conflicts.count(client_id_for(child)))
+    if (conflicts.count(process_key_for(child)))
       child.workload_id[0] = '\0';
   }
   nvml_session session;
@@ -874,8 +884,7 @@ std::string lupine_monitoring_render_metrics() {
         << label("client_address", child.client_address) << ','
         << label("client_hostname", metadata.client_hostname) << ','
         << label("client_name", metadata.client_process_name) << ','
-        << label("workload_id", child.workload_id) << ',' << "client_pid=\""
-        << metadata.client_pid << "\","
+        << "client_pid=\"" << metadata.client_pid << "\","
         << label("connection_kind", metadata.connection_kind) << ','
         << "host_pid=\"" << child.host_pid << "\"," << "server_pid=\""
         << child.server_pid << "\"} 1\n";
