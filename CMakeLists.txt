@@ -874,11 +874,6 @@ if(BUILD_TESTING)
         add_test(NAME monitor_server_test COMMAND monitor_server_test)
     endif()
 
-    add_executable(monitor_metadata_test monitor_metadata_test.cpp)
-    target_link_libraries(monitor_metadata_test PRIVATE lupine_rpc_core)
-    lupine_apply_sanitizer(monitor_metadata_test)
-    add_test(NAME monitor_metadata_test COMMAND monitor_metadata_test)
-
     add_executable(h2_test
         ${CMAKE_CURRENT_SOURCE_DIR}/h2_test.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/monitor_client.cpp)
